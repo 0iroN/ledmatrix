@@ -1,0 +1,153 @@
+title: Matrix Led
+views:
+  - title: Matrix Led
+    path: led-matris
+    icon: mdi:led-strip-variant
+    cards:
+      - type: entities
+        title: Resim / GIF
+        entities:
+          - entity: input_select.ledmatrix_dosya
+          - type: button
+            name: Göster
+            icon: mdi:image-play
+            action_name: GÖSTER
+            tap_action:
+              action: perform-action
+              perform_action: script.ledmatrix_resim_goster
+          - type: weblink
+            name: Çizim / önizleme editörü
+            icon: mdi:draw
+            url: http://ledmatrix.local:8790/editor
+            new_tab: true
+          - type: weblink
+            name: Dosyalar · yükle · GIF döngü listesi
+            icon: mdi:upload
+            url: http://ledmatrix.local:8790/
+            new_tab: true
+      - type: entities
+        title: Yazı
+        entities:
+          - entity: input_text.ledmatrix_metin
+          - entity: input_text.ledmatrix_yazi_renk
+          - type: button
+            name: Yazıyı göster
+            icon: mdi:format-text-variant
+            action_name: GÖSTER
+            tap_action:
+              action: perform-action
+              perform_action: script.ledmatrix_yazi_goster
+      - type: light
+        entity: light.led_matris_renk
+        name: Matrix Led — düz renk
+      # Masa Üstü Neo Led (ayrı 5V şerit): aynı ESP32, GPIO17, WLED segment 1 (matristen bağımsız)
+      - type: tile
+        entity: light.wled_segment_1
+        name: Masa Üstü Neo Led
+        features:
+          - type: light-brightness
+      - type: entities
+        title: Masa Üstü Neo Led — efekt
+        entities:
+          - entity: light.wled_segment_1
+            name: Masa Üstü Neo Led (renk / efekt için tıkla)
+          - entity: select.wled_segment_1_color_palette
+            name: Palet
+      - type: entities
+        title: Ekstralar
+        entities:
+          - type: button
+            name: Pomodoro (25 dk odak + 5 dk mola)
+            icon: mdi:timer-outline
+            action_name: BAŞLAT
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_pomodoro_baslat}
+          - type: button
+            name: Pomodoroyu durdur
+            icon: mdi:timer-off-outline
+            action_name: DURDUR
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_pomodoro_durdur}
+          - entity: input_text.ledmatrix_mesaj
+          - type: button
+            name: Mesajı gönder (3 kez kayar, sonra eski hâline döner)
+            icon: mdi:message-arrow-right
+            action_name: GÖNDER
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_mesaj_gonder}
+          - entity: input_boolean.ledmatrix_hosgeldin
+          - type: weblink
+            name: Yılan oyunu (telefonda aç)
+            icon: mdi:snake
+            url: http://ledmatrix.local:8790/yilan
+            new_tab: true
+          - entity: input_boolean.ledmatrix_sabah_isigi
+          - entity: input_datetime.ledmatrix_uyanma
+          - entity: input_number.ledmatrix_gundogumu_dk
+          - type: button
+            name: Gün doğumunu şimdi dene
+            icon: mdi:weather-sunset-up
+            action_name: DENE
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_gundogumu_dene}
+      - type: entities
+        title: Bilgi döngüsü sayfaları (kapalı = gösterme)
+        entities:
+          - input_select.ledmatrix_sayfa_saat
+          - input_select.ledmatrix_sayfa_hava
+          - input_select.ledmatrix_sayfa_pm25
+          - input_select.ledmatrix_sayfa_takvim
+          - input_select.ledmatrix_sayfa_saglik
+          - input_select.ledmatrix_sayfa_minecraft
+          - input_select.ledmatrix_sayfa_gif
+      # Rastgele GIF sayfasının havuzu: ✅ döngüde, ⬜ döngü dışında (dosya silinmez).
+      - type: entities
+        title: Bilgi döngüsü — rastgele GIF listesi
+        entities:
+          - entity: sensor.matrix_led_dongu_gif
+            name: Döngüdeki GIF'ler
+          - entity: input_select.ledmatrix_dongu_gif
+            name: GIF seç (✅ döngüde · ⬜ dışında)
+          - type: button
+            name: Seçili GIF'i döngüye al
+            icon: mdi:playlist-plus
+            action_name: EKLE
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_dongu_gif_ekle}
+          - type: button
+            name: Seçili GIF'i döngüden çıkar
+            icon: mdi:playlist-remove
+            action_name: ÇIKAR
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_dongu_gif_cikar}
+          - type: button
+            name: Bütün GIF'leri döngüye al
+            icon: mdi:playlist-check
+            action_name: HEPSİ
+            tap_action: {action: perform-action, perform_action: script.ledmatrix_dongu_gif_hepsini_al}
+          - type: button
+            name: Bütün GIF'leri döngüden çıkar
+            icon: mdi:playlist-minus
+            action_name: HİÇBİRİ
+            tap_action:
+              action: perform-action
+              perform_action: script.ledmatrix_dongu_gif_hepsini_cikar
+              confirmation:
+                text: "Bütün GIF'ler döngüden çıkarılsın mı? Dosyalar silinmez; sonra istediklerini tek tek ekleyebilirsin."
+      - type: markdown
+        title: Döngü dışında kalan GIF'ler
+        content: >-
+          {% set g = state_attr('sensor.matrix_led_dongu_gif', 'gifler') or [] %}
+          {% set disi = g | rejectattr('dongude') | map(attribute='dosya') | list %}
+          {% if not g %}Liste okunamadı (servis kapalı olabilir).
+          {% elif disi %}{{ disi | join(' · ') }}
+          {% else %}Hepsi döngüde ({{ g | count }} GIF).{% endif %}
+      - type: entities
+        title: Genel
+        entities:
+          - entity: input_number.ledmatrix_parlaklik
+          - entity: input_boolean.ledmatrix_dongu
+          - entity: input_boolean.ledmatrix_yazici_ekrani
+          - entity: sensor.led_matris_gosterilen
+            name: Şu an
+          - type: button
+            name: Durdur — WLED efektine dön
+            icon: mdi:stop
+            action_name: DURDUR
+            tap_action:
+              action: perform-action
+              perform_action: script.ledmatrix_durdur

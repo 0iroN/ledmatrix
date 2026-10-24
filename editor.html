@@ -1,0 +1,269 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>LED Editör</title>
+<style>
+  :root { --bg:#141414; --panel:#1e1e1e; --line:#2c2c2c; --tx:#e6e6e6; --dim:#8a8a8a; --acc:#2aa9dc; --off:#2b2b2b; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--tx); font:14px/1.4 system-ui, sans-serif; }
+  main { max-width: 980px; margin: 0 auto; padding: 12px 16px 40px; }
+  h1 { font-size: 18px; margin: 4px 0 12px; }
+  .row { display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin: 8px 0; }
+  .box { background:var(--panel); border:1px solid var(--line); border-radius:10px; padding:10px 12px; margin: 10px 0; }
+  .box h2 { font-size: 13px; color: var(--dim); font-weight: 600; margin: 0 0 6px; text-transform: uppercase; letter-spacing: .04em; }
+  button, select, input[type=text], input[type=number] {
+    background:#262626; color:var(--tx); border:1px solid #3a3a3a; border-radius:7px; padding:7px 10px; font:inherit; }
+  button { cursor:pointer; }
+  button:hover { border-color:#555; }
+  button.on { background: var(--acc); border-color: var(--acc); color:#001018; font-weight:600; }
+  button.ana { background:#1f5f7a; border-color:#2a86ab; }
+  input[type=color] { width:44px; height:34px; border:none; background:none; padding:0; }
+  input[type=number] { width: 80px; }
+  #cv { width:100%; height:auto; display:block; touch-action:none; border-radius:8px; background:#0b0b0b; cursor:crosshair; }
+  .sw { width:26px; height:26px; border-radius:50%; border:2px solid #444; cursor:pointer; }
+  #durum { color: var(--dim); min-height: 1.4em; }
+  .k { color: var(--dim); font-size: 12px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>LED Editör — 32×16</h1>
+
+  <div class="box">
+    <h2>Dosya</h2>
+    <div class="row">
+      <select id="dosyalar"></select>
+      <button id="ac">Önizle / düzenle</button>
+      <button id="yeni">Boş tuval</button>
+      <label class="k">ya da yükle: <input type="file" id="yukleInp" accept="image/*"></label>
+    </div>
+  </div>
+
+  <canvas id="cv" width="1280" height="640"></canvas>
+  <div id="durum"></div>
+
+  <div class="box">
+    <h2>Araç</h2>
+    <div class="row">
+      <button data-arac="kalem" class="on">✏️ Kalem</button>
+      <button data-arac="silgi">⬛ Silgi (LED kapalı)</button>
+      <button data-arac="damla">💧 Renk al</button>
+      <button data-arac="kova">🪣 Doldur</button>
+      <input type="color" id="renk" value="#2aa9dc">
+      <span id="paleti" class="row" style="margin:0"></span>
+      <button id="geri" title="Ctrl+Z">↶ Geri al</button>
+      <button id="temizle">Kareyi temizle</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <h2>Kareler (animasyon)</h2>
+    <div class="row">
+      <button id="onceki">◀</button><span id="kareNo">1 / 1</span><button id="sonraki">▶</button>
+      <label class="k">süre (ms) <input type="number" id="sure" min="20" max="10000" step="10" value="100"></label>
+      <button id="kareEkle">+ Kare (kopya)</button>
+      <button id="kareSil">Kareyi sil</button>
+      <button id="oynat">▶ Burada oynat</button>
+    </div>
+  </div>
+
+  <div class="box">
+    <h2>Panel</h2>
+    <div class="row">
+      <button id="gonder" class="ana">Panelde göster</button>
+      <label><input type="checkbox" id="canli"> Canlı (her çizgide panele gönder)</label>
+      <label class="k">parlaklık <input type="range" id="bri" min="5" max="100" step="5" value="30"> <span id="briTx">30%</span></label>
+      <button id="dur">Durdur</button>
+    </div>
+    <div class="row">
+      <input type="text" id="ad" placeholder="dosya adı" style="flex:1;min-width:160px">
+      <button id="kaydet" class="ana">Kaydet (HA listesine eklenir)</button>
+    </div>
+    <div class="k">Tek kare PNG, çok kare GIF olarak kaydedilir. 32×16 kaydedilen dosya panelde birebir, hiç işlenmeden gösterilir.</div>
+  </div>
+</main>
+
+<script>
+const W = 32, H = 16;
+const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
+const $ = id => document.getElementById(id);
+const P = cv.width / W;                       // bir LED'in tuvaldeki boyu
+
+let kareler = [{ px: bos(), dur: 100 }];      // px: Uint8Array(W*H*3), dur: ms
+let ki = 0;                                   // seçili kare
+let arac = 'kalem';
+let geriYigin = [];
+let oynatZamanlayici = null;
+
+function bos() { return new Uint8Array(W * H * 3); }
+function hexRgb(h) { h = h.replace('#', ''); return [0, 2, 4].map(i => parseInt(h.substr(i, 2), 16)); }
+function rgbHex(r, g, b) { return '#' + [r, g, b].map(v => v.toString(16).padStart(2, '0')).join(''); }
+function durum(t) { $('durum').textContent = t; }
+
+// ---- çizim ----
+function ciz() {
+  const px = kareler[ki].px;
+  ctx.fillStyle = '#0b0b0b'; ctx.fillRect(0, 0, cv.width, cv.height);
+  for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
+    const i = (y * W + x) * 3, r = px[i], g = px[i + 1], b = px[i + 2];
+    const kapali = r + g + b === 0;
+    ctx.beginPath();
+    ctx.arc(x * P + P / 2, y * P + P / 2, P * 0.38, 0, Math.PI * 2);
+    ctx.fillStyle = kapali ? '#262626' : `rgb(${r},${g},${b})`;
+    if (!kapali) { ctx.shadowColor = `rgb(${r},${g},${b})`; ctx.shadowBlur = P * 0.35; }
+    ctx.fill(); ctx.shadowBlur = 0;
+  }
+  $('kareNo').textContent = `${ki + 1} / ${kareler.length}`;
+  $('sure').value = kareler[ki].dur;
+}
+
+function hucre(ev) {
+  const r = cv.getBoundingClientRect();
+  const x = Math.floor((ev.clientX - r.left) / r.width * W);
+  const y = Math.floor((ev.clientY - r.top) / r.height * H);
+  return (x >= 0 && x < W && y >= 0 && y < H) ? [x, y] : null;
+}
+
+function yaz(x, y, rgb) {
+  const px = kareler[ki].px, i = (y * W + x) * 3;
+  px[i] = rgb[0]; px[i + 1] = rgb[1]; px[i + 2] = rgb[2];
+}
+
+function oku(x, y) { const px = kareler[ki].px, i = (y * W + x) * 3; return [px[i], px[i + 1], px[i + 2]]; }
+
+function doldur(x0, y0, yeni) {
+  // 4-komşulu taşma doldurma: tıklanan LED ile AYNI renkteki bitişik bölgeyi boyar
+  const hedef = oku(x0, y0).join();
+  if (hedef === yeni.join()) return;
+  const yigin = [[x0, y0]];
+  while (yigin.length) {
+    const [x, y] = yigin.pop();
+    if (x < 0 || x >= W || y < 0 || y >= H || oku(x, y).join() !== hedef) continue;
+    yaz(x, y, yeni);
+    yigin.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+}
+
+function geriKaydet() {
+  geriYigin.push({ ki, px: kareler[ki].px.slice() });
+  if (geriYigin.length > 60) geriYigin.shift();
+}
+
+let basili = false;
+function uygula(ev) {
+  const c = hucre(ev); if (!c) return;
+  const [x, y] = c;
+  if (arac === 'damla') { $('renk').value = rgbHex(...oku(x, y)); paletEkle($('renk').value); return; }
+  if (arac === 'kova') { doldur(x, y, hexRgb($('renk').value)); ciz(); return; }
+  yaz(x, y, arac === 'silgi' ? [0, 0, 0] : hexRgb($('renk').value));
+  ciz();
+}
+cv.addEventListener('pointerdown', ev => {
+  cv.setPointerCapture(ev.pointerId); geriKaydet(); basili = true; uygula(ev);
+});
+cv.addEventListener('pointermove', ev => { if (basili && (arac === 'kalem' || arac === 'silgi')) uygula(ev); });
+cv.addEventListener('pointerup', () => { basili = false; if (arac !== 'damla') { paletEkle($('renk').value); canliGonder(); } });
+
+document.querySelectorAll('[data-arac]').forEach(b => b.onclick = () => {
+  arac = b.dataset.arac;
+  document.querySelectorAll('[data-arac]').forEach(o => o.classList.toggle('on', o === b));
+});
+
+$('geri').onclick = geriAl;
+document.addEventListener('keydown', e => { if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); geriAl(); } });
+function geriAl() {
+  const s = geriYigin.pop(); if (!s) return;
+  if (kareler[s.ki]) { kareler[s.ki].px = s.px; ki = s.ki; ciz(); canliGonder(); }
+}
+$('temizle').onclick = () => { geriKaydet(); kareler[ki].px = bos(); ciz(); canliGonder(); };
+
+// ---- palet: son kullanılan renkler ----
+let palet = ['#2aa9dc', '#ffffff', '#ff8c00', '#ff0028', '#00ff40', '#ffd000'];
+function paletEkle(h) { palet = [h, ...palet.filter(p => p !== h)].slice(0, 10); paletCiz(); }
+function paletCiz() {
+  $('paleti').innerHTML = '';
+  for (const h of palet) {
+    const s = document.createElement('span'); s.className = 'sw'; s.style.background = h; s.title = h;
+    s.onclick = () => { $('renk').value = h; if (arac === 'silgi' || arac === 'damla') document.querySelector('[data-arac=kalem]').click(); };
+    $('paleti').appendChild(s);
+  }
+}
+
+// ---- kareler ----
+$('onceki').onclick = () => { ki = (ki - 1 + kareler.length) % kareler.length; ciz(); };
+$('sonraki').onclick = () => { ki = (ki + 1) % kareler.length; ciz(); };
+$('kareEkle').onclick = () => { kareler.splice(ki + 1, 0, { px: kareler[ki].px.slice(), dur: kareler[ki].dur }); ki++; ciz(); };
+$('kareSil').onclick = () => { if (kareler.length > 1) { kareler.splice(ki, 1); ki = Math.min(ki, kareler.length - 1); ciz(); } };
+$('sure').onchange = () => { kareler[ki].dur = Math.max(20, Math.min(10000, +$('sure').value || 100)); };
+$('oynat').onclick = () => {
+  if (oynatZamanlayici) { clearTimeout(oynatZamanlayici); oynatZamanlayici = null; $('oynat').textContent = '▶ Burada oynat'; return; }
+  $('oynat').textContent = '■ Durdur';
+  const adim = () => { ki = (ki + 1) % kareler.length; ciz(); oynatZamanlayici = setTimeout(adim, kareler[ki].dur); };
+  oynatZamanlayici = setTimeout(adim, kareler[ki].dur);
+};
+
+// ---- sunucu ----
+function hexKare(px) { return Array.from(px, v => v.toString(16).padStart(2, '0')).join(''); }
+function kareKare(hex) { const a = new Uint8Array(W * H * 3); for (let i = 0; i < a.length; i++) a[i] = parseInt(hex.substr(i * 2, 2), 16); return a; }
+function govde() {
+  return { frames: kareler.map(k => ({ px: hexKare(k.px), dur: k.dur / 1000 })), parlaklik: +$('bri').value / 100 };
+}
+async function post(yol, b) {
+  const r = await fetch(yol, { method: 'POST', body: JSON.stringify(b) });
+  return { ok: r.ok, kod: r.status, j: await r.json().catch(() => ({})) };
+}
+
+async function listeYenile(sec) {
+  const j = await (await fetch('/liste')).json();
+  $('dosyalar').replaceChildren(...j.dosyalar.map(d => new Option(d, d)));
+  if (sec) $('dosyalar').value = sec;
+}
+async function ac(ad) {
+  durum('yükleniyor…');
+  const r = await fetch('/onizleme?dosya=' + encodeURIComponent(ad));
+  const j = await r.json();
+  if (!r.ok) { durum('hata: ' + j.hata); return; }
+  kareler = j.frames.map(f => ({ px: kareKare(f.px), dur: Math.round(f.dur * 1000) }));
+  ki = 0; geriYigin = []; ciz();
+  $('ad').value = ad.replace(/\.[^.]+$/, '') + '-led';
+  durum(`${ad}: ${kareler.length} kare — panelde böyle görünecek. Düzenleyip kaydedebilirsin.`);
+}
+$('ac').onclick = () => $('dosyalar').value && ac($('dosyalar').value);
+$('yeni').onclick = () => { kareler = [{ px: bos(), dur: 100 }]; ki = 0; geriYigin = []; $('ad').value = 'cizim'; ciz(); durum('boş tuval'); };
+$('yukleInp').onchange = async () => {
+  const f = $('yukleInp').files[0]; if (!f) return;
+  durum('yükleniyor: ' + f.name);
+  const r = await fetch('/yukle?ad=' + encodeURIComponent(f.name), { method: 'PUT', body: f });
+  if (!r.ok) { durum('hata: ' + (await r.json()).hata); return; }
+  const ad = (await r.json()).dosya; await listeYenile(ad); ac(ad);
+};
+
+$('gonder').onclick = async () => { const r = await post('/piksel', govde()); durum(r.ok ? 'panelde gösteriliyor' : 'hata: ' + r.j.hata); };
+let canliZ = null;
+function canliGonder() {
+  if (!$('canli').checked) return;
+  clearTimeout(canliZ); canliZ = setTimeout(() => post('/piksel', govde()), 120);
+}
+$('canli').onchange = canliGonder;
+$('bri').oninput = () => { $('briTx').textContent = $('bri').value + '%'; };
+$('bri').onchange = () => post('/parlaklik', { parlaklik: +$('bri').value / 100 });
+$('dur').onclick = async () => { await post('/dur', {}); durum('durduruldu — WLED kendi efektine döner'); };
+
+$('kaydet').onclick = async () => {
+  const ad = $('ad').value.trim() || 'cizim';
+  let r = await post('/kaydet', { ...govde(), ad });
+  if (r.kod === 409 && confirm(`${r.j.dosya} zaten var. Üzerine yazılsın mı?`)) r = await post('/kaydet', { ...govde(), ad, uzerine_yaz: true });
+  if (r.ok) { durum('kaydedildi: ' + r.j.dosya + ' (HA listesi 1 dk içinde güncellenir)'); listeYenile(r.j.dosya); }
+  else if (r.kod !== 409) durum('hata: ' + r.j.hata);
+};
+
+paletCiz(); ciz();
+listeYenile().then(() => {
+  const q = new URLSearchParams(location.search).get('dosya');
+  if (q) { $('dosyalar').value = q; ac(q); }
+});
+</script>
+</body>
+</html>

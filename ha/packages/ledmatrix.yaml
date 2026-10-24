@@ -1,0 +1,607 @@
+# Matrix Led (16x32 WS2812B, yatay 32x16) — Pi'deki ledmatrix servisini sürer.
+# Servis: http://ledmatrix.local:8790  (kaynak: Desktop/ssh/ledmatrix/server.py)
+# Resim yükleme sayfası: http://ledmatrix.local:8790/
+
+rest_command:
+  ledmatrix_goster:
+    url: http://ledmatrix.local:8790/goster
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"dosya": {{ dosya | to_json }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_yazi:
+    url: http://ledmatrix.local:8790/yazi
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"metin": {{ metin | to_json }}, "renk": {{ renk | to_json }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_renk:
+    url: http://ledmatrix.local:8790/renk
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"renk": {{ renk | to_json }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_dur:
+    url: http://ledmatrix.local:8790/dur
+    method: POST
+  ledmatrix_yazici:
+    url: http://ledmatrix.local:8790/sahne/yazici
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"durum": {{ states('sensor.a1_03919d572410453_print_status') | to_json }},
+       "yuzde": {{ states('sensor.a1_03919d572410453_print_progress') | float(0) }},
+       "kalan_saat": {{ states('sensor.a1_03919d572410453_remaining_time') | float(0) }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_yazici_bitir:            # yazıcı ekranı kapatılınca sahneden çık (eski içerik döner)
+    url: http://ledmatrix.local:8790/sahne/yazici
+    method: POST
+    content_type: application/json
+    payload: '{"durum": "idle"}'
+  ledmatrix_dongu:
+    url: http://ledmatrix.local:8790/sahne/dongu
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"acik": {{ is_state('input_boolean.ledmatrix_dongu', 'on') | to_json }},
+       "sayfalar": {
+       {%- for ad in ['saat', 'hava', 'pm25', 'takvim', 'saglik', 'minecraft', 'gif'] -%}
+         {%- set v = states('input_select.ledmatrix_sayfa_' ~ ad) -%}
+         "{{ ad }}": {{ 0 if v in ('kapalı', 'unknown', 'unavailable') else v.split(' ')[0] | int(0) }}{{ ',' if not loop.last }}
+       {%- endfor -%} },
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_bilgi:
+    url: http://ledmatrix.local:8790/bilgi
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"hava": {{ states('weather.forecast_home') | to_json }},
+       "sicaklik": {{ state_attr('weather.forecast_home', 'temperature') | to_json }},
+       "pm25": {{ states('sensor.living_room_pm2_5') | to_json }}}
+  ledmatrix_pomodoro:
+    url: http://ledmatrix.local:8790/sahne/pomodoro
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"dakika": {{ dakika | default(25) | float(25) }}, "mola": {{ mola | default(5) | float(5) }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_mesaj:
+    url: http://ledmatrix.local:8790/sahne/mesaj
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"metin": {{ metin | to_json }}, "tekrar": {{ tekrar | default(3) | int(3) }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_gundogumu:
+    url: http://ledmatrix.local:8790/sahne/gundogumu
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"dakika": {{ dakika | default(20) | float(20) }},
+       "parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_parlaklik:
+    url: http://ledmatrix.local:8790/parlaklik
+    method: POST
+    content_type: application/json
+    payload: >-
+      {"parlaklik": {{ states('input_number.ledmatrix_parlaklik') | float(30) / 100 }}}
+  ledmatrix_dongu_gif:               # bir GIF'i bilgi döngüsünün rastgele GIF havuzuna al / çıkar
+    url: http://ledmatrix.local:8790/dongu/gifler
+    method: POST
+    content_type: application/json
+    payload: '{"dosya": {{ dosya | to_json }}, "dongude": {{ dongude | to_json }}}'
+  ledmatrix_dongu_gif_hepsi:         # hepsi true = hepsini al, false = hepsini çıkar
+    url: http://ledmatrix.local:8790/dongu/gifler
+    method: POST
+    content_type: application/json
+    payload: '{"hepsi": {{ hepsi | to_json }}}'
+
+rest:
+  - resource: http://ledmatrix.local:8790/liste
+    scan_interval: 60
+    sensor:
+      - name: Matrix Led Dosyalar
+        unique_id: ledmatrix_dosyalar
+        icon: mdi:folder-image
+        value_template: "{{ value_json.dosyalar | count }}"
+        json_attributes:
+          - dosyalar
+  - resource: http://ledmatrix.local:8790/durum
+    scan_interval: 10
+    sensor:
+      - name: Matrix Led Gösterilen
+        unique_id: ledmatrix_gosterilen
+        icon: mdi:led-strip-variant
+        value_template: "{{ value_json.gosterilen }}"
+  # Bilgi döngüsünün GIF havuzu: durum "döngüdeki / toplam", liste özniteliği seçme kutusunu doldurur.
+  - resource: http://ledmatrix.local:8790/dongu/gifler
+    scan_interval: 60
+    sensor:
+      - name: Matrix Led Döngü GIF
+        unique_id: ledmatrix_dongu_gifleri
+        icon: mdi:file-gif-box
+        value_template: >-
+          {{ value_json.gifler | selectattr('dongude') | list | count }} / {{ value_json.gifler | count }}
+        json_attributes:
+          - gifler
+
+input_select:
+  ledmatrix_sayfa_saat:
+    name: "Döngü: Saat"
+    icon: mdi:clock-outline
+    options:
+      - "10 sn"
+      - "kapalı"
+      - "3 sn"
+      - "5 sn"
+      - "6 sn"
+      - "8 sn"
+      - "15 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_sayfa_hava:
+    name: "Döngü: Hava durumu"
+    icon: mdi:weather-partly-cloudy
+    options:
+      - "6 sn"
+      - "kapalı"
+      - "3 sn"
+      - "5 sn"
+      - "8 sn"
+      - "10 sn"
+      - "15 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_sayfa_pm25:
+    name: "Döngü: Atölye PM2.5"
+    icon: mdi:air-filter
+    options:
+      - "6 sn"
+      - "kapalı"
+      - "3 sn"
+      - "5 sn"
+      - "8 sn"
+      - "10 sn"
+      - "15 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_sayfa_takvim:
+    name: "Döngü: Takvim kapısı"
+    icon: mdi:calendar-alert
+    options:
+      - "8 sn"
+      - "kapalı"
+      - "3 sn"
+      - "5 sn"
+      - "6 sn"
+      - "10 sn"
+      - "15 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_sayfa_saglik:
+    name: "Döngü: Sistem sağlığı"
+    icon: mdi:thermometer
+    options:
+      - "6 sn"
+      - "kapalı"
+      - "3 sn"
+      - "5 sn"
+      - "8 sn"
+      - "10 sn"
+      - "15 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_sayfa_minecraft:
+    name: "Döngü: Minecraft"
+    icon: mdi:minecraft
+    options:
+      - "5 sn"
+      - "kapalı"
+      - "3 sn"
+      - "6 sn"
+      - "8 sn"
+      - "10 sn"
+      - "15 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_sayfa_gif:
+    name: "Döngü: Rastgele GIF"
+    icon: mdi:file-gif-box
+    options:
+      - "15 sn"
+      - "kapalı"
+      - "3 sn"
+      - "5 sn"
+      - "6 sn"
+      - "8 sn"
+      - "10 sn"
+      - "20 sn"
+      - "30 sn"
+      - "60 sn"
+  ledmatrix_dosya:
+    name: Resim / GIF
+    icon: mdi:image
+    options:
+      - "(liste yükleniyor)"
+  ledmatrix_dongu_gif:               # "✅ kedi.gif" döngüde, "⬜ kedi.gif" döngü dışında
+    name: Döngü GIF'i
+    icon: mdi:file-gif-box
+    options:
+      - "(liste yükleniyor)"
+
+input_text:
+  ledmatrix_mesaj:
+    name: Geçici mesaj
+    icon: mdi:message-text
+    max: 120
+  ledmatrix_metin:
+    name: Yazı
+    icon: mdi:format-text
+    max: 200
+    initial: OSMAN
+  ledmatrix_yazi_renk:
+    name: Yazı rengi (hex)
+    icon: mdi:palette
+    max: 7
+    pattern: "#?[0-9a-fA-F]{6}"
+    initial: ff8c00
+
+input_boolean:
+  ledmatrix_hosgeldin:
+    name: Eve gelince karşıla
+    icon: mdi:home-heart
+  ledmatrix_sabah_isigi:
+    name: Sabah ışığı (uyanmadan önce gün doğumu)
+    icon: mdi:weather-sunset-up
+  ledmatrix_dongu:
+    name: Bilgi döngüsü (saat / hava / PM2.5 / GIF)
+    icon: mdi:clock-digital
+  ledmatrix_yazici_ekrani:
+    name: 3D yazıcı ekranı
+    icon: mdi:printer-3d-nozzle
+    initial: true
+
+input_datetime:
+  ledmatrix_uyanma:
+    name: Uyanma saati
+    icon: mdi:alarm
+    has_date: false
+    has_time: true
+
+input_number:
+  ledmatrix_gundogumu_dk:
+    name: Gün doğumu süresi
+    icon: mdi:weather-sunset-up
+    min: 5
+    max: 45
+    step: 5
+    unit_of_measurement: dk
+  ledmatrix_parlaklik:
+    name: Parlaklık
+    icon: mdi:brightness-6
+    min: 5
+    max: 100
+    step: 5
+    unit_of_measurement: "%"
+    initial: 30
+
+# Renk çarkı: HA'nın kendi renk seçicisiyle düz renk. Kapatınca WLED efektine döner.
+template:
+  - light:
+      - name: Matrix Led Renk
+        unique_id: ledmatrix_renk_isigi
+        icon: mdi:palette-swatch
+        turn_on:
+          - action: input_boolean.turn_off       # elle renk seçmek bilgi döngüsünü kapatır
+            target:
+              entity_id: input_boolean.ledmatrix_dongu
+          - action: rest_command.ledmatrix_renk
+            data:
+              renk: >-
+                {% set c = state_attr('light.led_matris_renk', 'rgb_color') or [255, 140, 0] %}
+                {{ '%02x%02x%02x' % (c[0] | int, c[1] | int, c[2] | int) }}
+        turn_off:
+          - action: rest_command.ledmatrix_dur
+        set_rgb:
+          - action: input_boolean.turn_off
+            target:
+              entity_id: input_boolean.ledmatrix_dongu
+          - action: rest_command.ledmatrix_renk
+            data:
+              renk: "{{ '%02x%02x%02x' % (r | int, g | int, b | int) }}"
+
+script:
+  ledmatrix_pomodoro_baslat:
+    alias: Matrix Led — pomodoro başlat (25 + 5)
+    icon: mdi:timer-outline
+    fields:
+      dakika: {description: "Odak süresi (dk)", default: 25, example: 25}
+      mola: {description: "Mola süresi (dk)", default: 5, example: 5}
+    sequence:
+      - action: rest_command.ledmatrix_pomodoro
+        data:
+          dakika: "{{ dakika | default(25) }}"
+          mola: "{{ mola | default(5) }}"
+  ledmatrix_pomodoro_durdur:
+    alias: Matrix Led — pomodoro durdur
+    icon: mdi:timer-off-outline
+    sequence:
+      - action: rest_command.ledmatrix_pomodoro
+        data: {dakika: 0, mola: 0}
+  ledmatrix_mesaj_gonder:
+    alias: Matrix Led — geçici mesaj gönder
+    icon: mdi:message-arrow-right
+    description: "Telefondan / başka otomasyondan çağrılabilir: metin alanı verilmezse panodaki kutu kullanılır."
+    fields:
+      metin: {description: "Gösterilecek yazı", example: "YEMEK HAZIR"}
+      tekrar: {description: "Kaç kez kaysın", default: 3, example: 3}
+    sequence:
+      - action: rest_command.ledmatrix_mesaj
+        data:
+          metin: "{{ metin if metin is defined and metin else states('input_text.ledmatrix_mesaj') }}"
+          tekrar: "{{ tekrar | default(3) }}"
+  ledmatrix_gundogumu_dene:
+    alias: Matrix Led — gün doğumunu şimdi başlat
+    icon: mdi:weather-sunset-up
+    sequence:
+      - action: rest_command.ledmatrix_gundogumu
+        data:
+          dakika: "{{ states('input_number.ledmatrix_gundogumu_dk') | int(20) }}"
+  ledmatrix_resim_goster:
+    alias: Matrix Led — seçili resmi göster
+    icon: mdi:image-play
+    sequence:
+      - condition: template
+        value_template: "{{ not states('input_select.ledmatrix_dosya').startswith('(') }}"
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.ledmatrix_dongu
+      - action: rest_command.ledmatrix_goster
+        data:
+          dosya: "{{ states('input_select.ledmatrix_dosya') }}"
+  ledmatrix_yazi_goster:
+    alias: Matrix Led — yazıyı göster
+    icon: mdi:format-text-variant
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.ledmatrix_dongu
+      - action: rest_command.ledmatrix_yazi
+        data:
+          metin: "{{ states('input_text.ledmatrix_metin') }}"
+          renk: "{{ states('input_text.ledmatrix_yazi_renk') | replace('#', '') }}"
+  # Döngü GIF listesi: seçili GIF'in başındaki ✅/⬜ işareti atılıp dosya adı gönderilir;
+  # ardından sensör hemen tazelenir ki seçme kutusundaki işaret 60 sn beklemeden değişsin.
+  ledmatrix_dongu_gif_ekle:
+    alias: Matrix Led — seçili GIF'i döngüye al
+    icon: mdi:playlist-plus
+    sequence:
+      - condition: template
+        value_template: "{{ not states('input_select.ledmatrix_dongu_gif').startswith('(') }}"
+      - action: rest_command.ledmatrix_dongu_gif
+        data:
+          dosya: "{{ states('input_select.ledmatrix_dongu_gif').split(' ', 1)[-1] }}"
+          dongude: true
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.matrix_led_dongu_gif
+  ledmatrix_dongu_gif_cikar:
+    alias: Matrix Led — seçili GIF'i döngüden çıkar
+    icon: mdi:playlist-remove
+    sequence:
+      - condition: template
+        value_template: "{{ not states('input_select.ledmatrix_dongu_gif').startswith('(') }}"
+      - action: rest_command.ledmatrix_dongu_gif
+        data:
+          dosya: "{{ states('input_select.ledmatrix_dongu_gif').split(' ', 1)[-1] }}"
+          dongude: false
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.matrix_led_dongu_gif
+  ledmatrix_dongu_gif_hepsini_al:
+    alias: Matrix Led — bütün GIF'leri döngüye al
+    icon: mdi:playlist-check
+    sequence:
+      - action: rest_command.ledmatrix_dongu_gif_hepsi
+        data: {hepsi: true}
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.matrix_led_dongu_gif
+  ledmatrix_dongu_gif_hepsini_cikar:
+    alias: Matrix Led — bütün GIF'leri döngüden çıkar
+    icon: mdi:playlist-minus
+    description: "Sonra yalnız istediklerini 'Döngüye al' ile ekle. Hiç GIF kalmazsa döngü GIF sayfasını atlar."
+    sequence:
+      - action: rest_command.ledmatrix_dongu_gif_hepsi
+        data: {hepsi: false}
+      - action: homeassistant.update_entity
+        target:
+          entity_id: sensor.matrix_led_dongu_gif
+  ledmatrix_durdur:
+    alias: Matrix Led — durdur (WLED efektine dön)
+    icon: mdi:stop
+    sequence:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.ledmatrix_dongu
+      - action: rest_command.ledmatrix_dur
+
+automation:
+  # Eve geliş: Osman (telefon/saat) eve girince geçici mesaj + şerit nefesi.
+  - id: ledmatrix_hosgeldin
+    alias: Matrix Led — eve gelince karşıla
+    triggers:
+      - trigger: state
+        entity_id: person.osman
+        from: not_home
+        to: home
+    conditions:
+      - condition: state
+        entity_id: input_boolean.ledmatrix_hosgeldin
+        state: "on"
+    actions:
+      - action: script.ledmatrix_mesaj_gonder
+        data:
+          metin: "HOŞ GELDİN OSMAN"
+          tekrar: 2
+  # Sabah ışığı: uyanma saatinden "gün doğumu süresi" kadar önce şerit yavaşça açılır.
+  - id: ledmatrix_sabah_isigi
+    alias: Matrix Led — sabah ışığı
+    triggers:
+      - trigger: time_pattern
+        minutes: "*"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.ledmatrix_sabah_isigi
+        state: "on"
+      - condition: template
+        value_template: >-
+          {% set dk = states('input_number.ledmatrix_gundogumu_dk') | int(20) %}
+          {% set hedef = today_at(states('input_datetime.ledmatrix_uyanma')) - timedelta(minutes=dk) %}
+          {{ now().strftime('%H:%M') == hedef.strftime('%H:%M') }}
+    actions:
+      - action: rest_command.ledmatrix_gundogumu
+        data:
+          dakika: "{{ states('input_number.ledmatrix_gundogumu_dk') | int(20) }}"
+  # Bilgi döngüsü: anahtar değişince servise bildir; servis yeniden başlarsa diye
+  # 10 dakikada bir de tekrarla (açıkken). Hava + PM2.5 verisi 5 dakikada bir gider.
+  - id: ledmatrix_dongu_anahtar
+    alias: Matrix Led — bilgi döngüsü aç/kapa
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id:
+          - input_boolean.ledmatrix_dongu
+          - input_select.ledmatrix_sayfa_saat
+          - input_select.ledmatrix_sayfa_hava
+          - input_select.ledmatrix_sayfa_pm25
+          - input_select.ledmatrix_sayfa_takvim
+          - input_select.ledmatrix_sayfa_saglik
+          - input_select.ledmatrix_sayfa_minecraft
+          - input_select.ledmatrix_sayfa_gif
+      - trigger: homeassistant
+        event: start
+      - trigger: time_pattern
+        minutes: "/10"
+    conditions:
+      - condition: or
+        conditions:
+          - condition: state
+            entity_id: input_boolean.ledmatrix_dongu
+            state: "on"
+          - condition: template
+            value_template: "{{ trigger.platform == 'state' }}"
+    actions:
+      - action: rest_command.ledmatrix_bilgi
+      - action: rest_command.ledmatrix_dongu
+  - id: ledmatrix_bilgi_gonder
+    alias: Matrix Led — hava ve PM2.5 verisini gönder
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id:
+          - weather.forecast_home
+          - sensor.living_room_pm2_5
+      - trigger: time_pattern
+        minutes: "/5"
+    actions:
+      - action: rest_command.ledmatrix_bilgi
+  # 3D yazıcı: durum, yüzde ya da kalan süre değişince Matrix Led + Masa Üstü Neo Led
+  # ilerlemeyi gösterir; baskı bitince 2 dk "BITTI", sonra eski içerik geri gelir.
+  - id: ledmatrix_yazici_sahnesi
+    alias: Matrix Led — 3D yazıcı ilerlemesi
+    mode: queued
+    max: 5
+    triggers:
+      - trigger: state
+        entity_id:
+          - sensor.a1_03919d572410453_print_status
+          - sensor.a1_03919d572410453_print_progress
+          - sensor.a1_03919d572410453_remaining_time
+    conditions:
+      - condition: state
+        entity_id: input_boolean.ledmatrix_yazici_ekrani
+        state: "on"
+    actions:
+      - action: rest_command.ledmatrix_yazici
+  - id: ledmatrix_yazici_ekrani_kapatildi
+    alias: Matrix Led — 3D yazıcı ekranı kapatılınca sahneden çık
+    triggers:
+      - trigger: state
+        entity_id: input_boolean.ledmatrix_yazici_ekrani
+        to: "off"
+    actions:
+      - action: rest_command.ledmatrix_yazici_bitir
+  # Kaydırıcı oynayınca gösterilen içerik anında yeni parlaklığa geçer
+  # (önceden yalnız bir sonraki "Göster"de etkiliydi).
+  - id: ledmatrix_parlaklik_canli
+    alias: Matrix Led — parlaklığı canlı uygula
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: input_number.ledmatrix_parlaklik
+    actions:
+      - action: rest_command.ledmatrix_parlaklik
+  - id: ledmatrix_liste_guncelle
+    alias: Matrix Led — dosya listesini güncelle
+    mode: queued
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: sensor.led_matris_dosyalar
+    actions:
+      - action: input_select.set_options
+        target:
+          entity_id: input_select.ledmatrix_dosya
+        data:
+          options: >-
+            {% set d = state_attr('sensor.led_matris_dosyalar', 'dosyalar') or [] %}
+            {{ d if d | count > 0 else ['(klasör boş — http://ledmatrix.local:8790/ adresinden yükle)'] }}
+  # Döngü GIF seçme kutusu: her GIF başında ✅ (döngüde) / ⬜ (dışında). set_options seçimi
+  # ilk seçeneğe sıfırlar; ekle/çıkar sonrası kullanıcı aynı GIF'te kalsın diye eski seçim
+  # (işaretsiz adıyla) yeni listede bulunup geri seçilir.
+  - id: ledmatrix_dongu_gif_liste
+    alias: Matrix Led — döngü GIF listesini güncelle
+    mode: queued
+    triggers:
+      - trigger: homeassistant
+        event: start
+      - trigger: state
+        entity_id: sensor.matrix_led_dongu_gif
+    variables:
+      secili: "{{ states('input_select.ledmatrix_dongu_gif').split(' ', 1)[-1] }}"
+      secenekler: >-
+        {% set g = state_attr('sensor.matrix_led_dongu_gif', 'gifler') or [] %}
+        {% set ns = namespace(l=[]) %}
+        {% for x in g %}{% set ns.l = ns.l + [('✅ ' if x.dongude else '⬜ ') ~ x.dosya] %}{% endfor %}
+        {% if ns.l %}{{ ns.l }}
+        {% elif states('sensor.matrix_led_dongu_gif') in ('unknown', 'unavailable') %}{{ ['(liste yükleniyor)'] }}
+        {% else %}{{ ['(GIF yok — http://ledmatrix.local:8790/ adresinden yükle)'] }}{% endif %}
+    actions:
+      - action: input_select.set_options
+        target:
+          entity_id: input_select.ledmatrix_dongu_gif
+        data:
+          options: "{{ secenekler }}"
+      - variables:
+          yeni: >-
+            {% set ns = namespace(s='') %}
+            {% for o in secenekler if o.split(' ', 1)[-1] == secili %}{% set ns.s = o %}{% endfor %}
+            {{ ns.s }}
+      - condition: template
+        value_template: "{{ yeni != '' }}"
+      - action: input_select.select_option
+        target:
+          entity_id: input_select.ledmatrix_dongu_gif
+        data:
+          option: "{{ yeni }}"

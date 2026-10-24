@@ -1,0 +1,16 @@
+[Unit]
+Description=LED matris servisi (HA -> DDP -> WLED)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/opt/ledmatrix
+Environment=WLED_IP=wled.local
+Environment=PORT=8790
+ExecStart=/usr/bin/python3 /opt/ledmatrix/server.py
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
