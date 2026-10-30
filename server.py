@@ -2,9 +2,10 @@
 
 Uçlar (hepsi JSON):
   GET  /liste                 -> {"dosyalar": [...]}  resimler/ klasöründeki resim/GIF'ler
-  GET  /durum                 -> şu an ne gösteriliyor
+  GET  /durum                 -> şu an ne gösteriliyor; kare gönderen iş parçacığı ölmüşse 503
+                                 (bekci_led.py bunu görünce servisi yeniden başlatır)
   GET  /saglik                -> 200 servis + WLED cevap veriyor, 503 ESP32'ye ulaşılamıyor
-                                 (araçlar sitesindeki Matrix Led rozeti bunu yoklar)
+                                 ya da kare gönderilmiyor (araçlar sitesindeki rozet bunu yoklar)
   POST /goster  {"dosya": "kedi.gif", "parlaklik": 0.3}
   POST /yazi    {"metin": "MERHABA", "renk": "ff8c00"}
   POST /renk    {"renk": "ff0000"}
@@ -70,7 +71,8 @@ class Oynatici:
         self.uretici = None         # parlaklik -> frames; parlaklık değişince yeniden üretmek için
         self.aciklama = "boşta"
         self.surum = 0              # her yeni gösterimde artar, eski döngüyü keser
-        threading.Thread(target=self._dongu, daemon=True).start()
+        self.gonderici = threading.Thread(target=self._dongu, daemon=True)
+        self.gonderici.start()
 
     def oynat(self, uretici, aciklama: str, bri: float):
         frames = uretici(bri)       # kilit dışında: büyük GIF'te saniyeler sürebilir
@@ -94,6 +96,7 @@ class Oynatici:
             self.surum += 1
 
     def _dongu(self):
+        ag_koptu = False            # ağ yokken her karede günlüğe yazmamak için
         while True:
             with self.lock:
                 frames, surum = self.frames, self.surum
@@ -103,7 +106,19 @@ class Oynatici:
             for rgb, dur in frames:
                 if self.surum != surum:
                     break
-                self.sender.send_frame(rgb)
+                try:
+                    self.sender.send_frame(rgb)
+                except OSError as e:
+                    # 30.10: modem yeniden başlarken sendto "Network is unreachable" attı, bu iş
+                    # parçacığı öldü; servis ve WLED ayakta göründü ama matrise kare gitmedi.
+                    if not ag_koptu:
+                        print(f"DDP gönderilemedi, ağ dönünce sürecek: {e}", flush=True)
+                        ag_koptu = True
+                    time.sleep(1.0)
+                    continue
+                if ag_koptu:
+                    print("DDP yeniden gidiyor", flush=True)
+                    ag_koptu = False
                 # durağan karede de tazele: WLED veri kesilince gerçek zamanlı moddan çıkar
                 time.sleep(min(dur, 1.0))
 
@@ -288,12 +303,19 @@ class Handler(BaseHTTPRequestHandler):
                                                 for d in liste() if d.lower().endswith(".gif")]})
         if yol == "/liste":
             return self._yanit(200, {"dosyalar": liste()})
+        # Kare gönderen iş parçacığı ölünce HTTP yine cevap verir ve açıklama sahneyle değişmeye
+        # devam eder; dışarıdan her şey sağlıklı görünür (30.10'da 6 dk böyle kaldı). Ölüm 503'tür.
+        canli = oynatici.gonderici.is_alive()
         if yol == "/durum":
-            return self._yanit(200, {"gosterilen": oynatici.aciklama, "wled": WLED_IP})
+            return self._yanit(200 if canli else 503,
+                               {"gosterilen": oynatici.aciklama, "wled": WLED_IP, "gonderici": canli})
         if yol == "/saglik":
             # /durum ESP32'ye hiç dokunmaz: matrisin fişi çekikken bile 200 döner. Rozet onu
             # yoklasaydı yalancı yeşil yanardı. "Sağlıklı" = bekci_led.py ile aynı tanım
             # (servis + WLED). WLED'in kapalı (on=false) olması arıza değil, yeşil kalır.
+            if not canli:
+                return self._yanit(503, {"servis": True, "gonderici": False,
+                                         "hata": "kare gönderen iş parçacığı durmuş"})
             try:
                 info = sahne.wled(WLED_IP, yol="/json/info")
             except Exception as e:

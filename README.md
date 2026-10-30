@@ -93,6 +93,11 @@ tanımlanınca DDP verisi de onun eşlemesinden geçer — eşleme İKİ yerde y
 - **Sağlık ucu (22.10):** `GET /saglik` → 200 servis + WLED cevap veriyor, 503 ESP32'ye
   ulaşılamıyor. Araçlar sitesindeki Matrix Led kartının rozeti bunu yoklar (Caddy
   `/matris-saglik`). `/durum` rozet için uygun DEĞİL: ESP32'ye dokunmaz, fiş çekikken de 200.
+- **Ağ kopması (30.10):** modem yeniden başlarken `sendto` "Network is unreachable" atınca kare
+  gönderen iş parçacığı ölüyordu: servis ve WLED cevap verdiği halde matrise kare gitmiyor, HA'dan
+  yalnız renk (WLED'e doğrudan giden) değişiyordu. Artık ağ hatasında bekler ve kendiliğinden sürer;
+  beklenmeyen bir hatayla ölürse `/durum` ve `/saglik` 503 döner, `bekci_led.py` servisi yeniden başlatır.
+  Teşhis: WLED `/json/info` → `live`, `lm`, `lip` (kare geliyorsa `true`, `DDP`, Pi'nin IP'si).
 - **Adlar (20.10):** WLED segmentleri "Matrix Led" / "Masa Üstü Neo Led"; HA'da aynı adlar
   (entity_id'ler değişmedi: `light.wled`, `light.wled_segment_1`).
 - Aynı anda tek gönderici: Pi servisi çalışırken bilgisayardan `goster.py` çalıştırma, kareler karışır.
